@@ -12,6 +12,8 @@
 // wxWindows headers
 #include <wx/wx.h>
 #include <wx/grid.h>
+#include <wx/datectrl.h>
+#include <wx/dateevt.h>
 
 // App headers
 #include "pgAdmin3.h"
@@ -26,6 +28,8 @@
 #include "frm/frmAbout.h"
 #include "frm/frmEditGrid.h"
 #include "ctl/ctlMenuToolbar.h"
+#include "ctl/calbox.h"
+#include "ctl/timespin.h"
 #include "dlg/dlgEditGridOptions.h"
 #include "frm/frmHint.h"
 #include "schema/pgCatalogObject.h"
@@ -1627,6 +1631,141 @@ wxArrayInt ctlSQLEditGrid::GetSelectedRows() const
 	return rows;
 }
 
+class sqlGridDateTimeEditor : public wxGridCellEditor
+{
+	public:
+		sqlGridDateTimeEditor(long type = PGOID_TYPE_DATE,
+						  const wxDateTime& date = wxDefaultDateTime,
+						  const wxString& format = wxT("%Y-%m-%d"),
+						  long style = wxDP_DEFAULT
+						  );
+
+		virtual wxGridCellEditor *Clone() const
+		{
+			sqlGridDateTimeEditor *sql_editor = new sqlGridDateTimeEditor;
+
+			sql_editor->m_start_date = m_start_date;
+		    sql_editor->m_format = m_format;
+		    sql_editor->m_style = m_style;
+
+			return sql_editor;
+		}
+
+		void Create(wxWindow *parent,
+					wxWindowID id,
+					wxEvtHandler *evtHandler);
+
+		void BeginEdit(int row, int col,
+					   wxGrid *grid);
+
+		bool EndEdit(int row, int col,
+					 wxGrid *grid);
+
+		wxString GetValue() const;
+
+		virtual void Reset()
+		{
+			DateCtrl()->SetValue(m_start_date);
+		}
+
+	protected:
+
+		wxCalendarBox *DateCtrl() const
+		{
+			return (wxCalendarBox *) m_control;
+		}
+
+		wxTimeSpinCtrl *TimeCtrl() const
+		{
+			return (wxTimeSpinCtrl *) m_control;
+		}
+
+		wxDateTime m_start_date;
+		wxString   m_format;
+	    long       m_style;
+	    long       m_type;
+};
+
+
+sqlGridDateTimeEditor::sqlGridDateTimeEditor(long type,
+									 const wxDateTime& date,
+									 const wxString& format,
+									 long style)
+:	m_type(type),
+	m_start_date(date),
+	m_format(format),
+	m_style(style)   { }
+
+void sqlGridDateTimeEditor::Create(wxWindow *parent,
+							   wxWindowID id,
+							   wxEvtHandler *evtHandler)
+{
+	if (m_type == PGOID_TYPE_DATE)
+	{
+		m_control = new wxCalendarBox(parent, id,
+									  m_start_date,
+									  wxDefaultPosition,
+									  wxDefaultSize,
+									  m_style);
+	}
+	else if (m_type == PGOID_TYPE_TIME)
+	{
+		m_control = new wxTimeSpinCtrl(parent, id,
+									   wxDefaultPosition,
+									   wxDefaultSize,
+									   m_style);
+		m_format = wxT("%H:%M:%S");
+	}
+
+	wxGridCellEditor::Create(parent, id, evtHandler);
+}
+
+void sqlGridDateTimeEditor::BeginEdit(int row, int col,
+								  wxGrid *grid)
+{
+	wxString str_date = grid->GetTable()->GetValue(row, col);
+
+	if (!m_start_date.ParseFormat(str_date.c_str(), m_format.c_str()))
+        m_start_date = wxDefaultDateTime;
+
+	if (m_type == PGOID_TYPE_DATE)
+	{
+		DateCtrl()->SetValue(m_start_date);
+	}
+	else if (m_type == PGOID_TYPE_TIME)
+	{
+		TimeCtrl()->SetTime(m_start_date);
+	}
+}
+
+bool sqlGridDateTimeEditor::EndEdit(int row,
+								int col,
+								wxGrid *grid)
+{
+
+	grid->GetTable()->SetValue(row, col, GetValue());
+
+	return true;
+}
+
+wxString sqlGridDateTimeEditor::GetValue() const
+{
+	wxString str;
+
+	if (m_type == PGOID_TYPE_DATE)
+	{
+		wxDateTime date = DateCtrl()->GetValue();
+		str = date.Format(m_format.c_str());
+	}
+	else if (m_type == PGOID_TYPE_TIME)
+	{
+		wxDateTime date = wxDateTime::Today() + TimeCtrl()->GetValue();
+		str = date.Format(m_format.c_str());
+	}
+
+	return str;
+}
+
 
 class sqlGridTextEditor : public wxGridCellTextEditor
 {
@@ -2125,7 +2264,7 @@ void sqlGridBoolEditor::BeginEdit(int row, int col, wxGrid *grid)
 				grid->GetTable()->SetValue(row, col, wxEmptyString);\
 				break;\
 }\
- 
+
 #if wxCHECK_VERSION(2, 9, 0)
 // pure virtual in 2.9+, doesn't exist in prior versions
 void sqlGridBoolEditor::ApplyEdit(int row, int col, wxGrid *grid)
@@ -2419,7 +2558,18 @@ sqlTable::sqlTable(pgConn *conn, pgQueryThread *_thread, const wxString &tabName
 					columns[i].attr->SetReadOnly(true);
 					break;
 				case PGOID_TYPE_DATE:
+					columns[i].numeric = false;
+					columns[i].attr->SetReadOnly(false);
+					columns[i].needResize = true;
+					editor = new sqlGridDateTimeEditor();
+					break;
+
 				case PGOID_TYPE_TIME:
+					columns[i].numeric = false;
+					columns[i].attr->SetReadOnly(false);
+					columns[i].needResize = true;
+					editor = new sqlGridDateTimeEditor(PGOID_TYPE_TIME);
+					break;
 				case PGOID_TYPE_TIMETZ:
 				case PGOID_TYPE_TIMESTAMP:
 				case PGOID_TYPE_TIMESTAMPTZ:
@@ -2435,7 +2585,18 @@ sqlTable::sqlTable(pgConn *conn, pgQueryThread *_thread, const wxString &tabName
 					columns[i].numeric = false;
 					columns[i].attr->SetReadOnly(false);
 					columns[i].needResize = true;
-					editor = new sqlGridTextEditor();
+
+					wxArrayString choices = GetChoicesIfIsEnum(connection, i);
+
+					if (choices.GetCount() > 0)
+					{
+						editor = new wxGridCellChoiceEditor(choices);
+					}
+					else
+					{
+						editor = new sqlGridTextEditor();
+					}
+
 					break;
 			}
 			if (editor)
@@ -2506,6 +2667,34 @@ sqlTable::~sqlTable()
 
 	if (lineIndex)
 		delete[] lineIndex;
+}
+
+
+wxArrayString sqlTable::GetChoicesIfIsEnum(pgConn *connection, int col)
+{
+
+	wxArrayString choices;
+
+	if (columns[col].type > 25000)
+	{
+		pgSet *enumSet = connection->ExecuteSet(
+							wxT("SELECT enumlabel")
+							wxT(" FROM pg_enum\n")
+							wxT(" WHERE enumtypid =") + NumToStr(columns[col].type) + wxT("")
+							wxT(" ORDER BY enumsortorder"));
+
+		if (enumSet)
+		{
+			for (int l = 0; l < enumSet->NumRows(); l++)
+			{
+				choices.Add(enumSet->GetVal(wxT("enumlabel")));
+				enumSet->MoveNext();
+			}
+			delete enumSet;
+		}
+	}
+
+	return choices;
 }
 
 

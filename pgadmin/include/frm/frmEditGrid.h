@@ -163,6 +163,7 @@ public:
 	bool StoreLine();
 	void UndoLine(int row);
 
+	wxArrayString GetChoicesIfIsEnum(pgConn *connection, int col);
 	int GetNumberRows();
 	int GetNumberStoredRows();
 	int GetNumberCols();
