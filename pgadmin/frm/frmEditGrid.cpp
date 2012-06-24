@@ -1152,12 +1152,18 @@ void frmEditGrid::OnDelete(wxCommandEvent &event)
 
 	if (editorCell->IsSet())
 	{
-		if (sqlGrid->GetTable()->IsColBoolean(sqlGrid->GetGridCursorCol()))
+		int gridCursorCol = sqlGrid->GetGridCursorCol();
+		int gridCursorRow = sqlGrid->GetGridCursorRow();
+
+		if (sqlGrid->GetTable()->IsColBoolean(gridCursorCol))
 			return;
 
-		if (sqlGrid->GetTable()->IsColText(sqlGrid->GetGridCursorCol()))
+		if (sqlGrid->GetTable()->IsColEnum(gridCursorCol))
+			return;
+
+		if (sqlGrid->GetTable()->IsColText(gridCursorCol))
 		{
-			wxStyledTextCtrl *text = (wxStyledTextCtrl *)sqlGrid->GetCellEditor(sqlGrid->GetGridCursorRow(), sqlGrid->GetGridCursorCol())->GetControl();
+			wxStyledTextCtrl *text = (wxStyledTextCtrl *)sqlGrid->GetCellEditor(gridCursorRow, gridCursorCol)->GetControl();
 			if (text && text->GetCurrentPos() <= text->GetTextLength())
 			{
 				if (text->GetSelectionStart() == text->GetSelectionEnd())
@@ -1167,7 +1173,7 @@ void frmEditGrid::OnDelete(wxCommandEvent &event)
 		}
 		else
 		{
-			wxTextCtrl *text = (wxTextCtrl *)sqlGrid->GetCellEditor(sqlGrid->GetGridCursorRow(), sqlGrid->GetGridCursorCol())->GetControl();
+			wxTextCtrl *text = (wxTextCtrl *)sqlGrid->GetCellEditor(gridCursorRow, gridCursorCol)->GetControl();
 			if (text)
 			{
 				long x, y;
@@ -2451,7 +2457,8 @@ sqlTable::sqlTable(pgConn *conn, pgQueryThread *_thread, const wxString &tabName
 	                    wxT("SELECT n.nspname AS nspname, relname, format_type(t.oid,NULL) AS typname, format_type(t.oid, att.atttypmod) AS displaytypname, ")
 	                    wxT("nt.nspname AS typnspname, attname, attnum, COALESCE(b.oid, t.oid) AS basetype, atthasdef, adsrc,\n")
 	                    wxT("       CASE WHEN t.typbasetype::oid=0 THEN att.atttypmod else t.typtypmod END AS typmod,\n")
-	                    wxT("       CASE WHEN t.typbasetype::oid=0 THEN att.attlen else t.typlen END AS typlen\n")
+	                    wxT("       CASE WHEN t.typbasetype::oid=0 THEN att.attlen else t.typlen END AS typlen,\n")
+	                    wxT("       CASE WHEN t.typinput = 'enum_in'::regproc AND t.typoutput = 'enum_out'::regproc THEN 1 else 0 END AS isenum\n")
 	                    wxT("  FROM pg_attribute att\n")
 	                    wxT("  JOIN pg_type t ON t.oid=att.atttypid\n")
 	                    wxT("  JOIN pg_namespace nt ON nt.oid=t.typnamespace\n")
@@ -2506,6 +2513,7 @@ sqlTable::sqlTable(pgConn *conn, pgQueryThread *_thread, const wxString &tabName
 			}
 			columns[i].typlen = colSet->GetLong(wxT("typlen"));
 			columns[i].typmod = colSet->GetLong(wxT("typmod"));
+			columns[i].isEnum = colSet->GetBool(wxT("isenum"));
 
 			switch (columns[i].type)
 			{
@@ -2675,7 +2683,7 @@ wxArrayString sqlTable::GetChoicesIfIsEnum(pgConn *connection, int col)
 
 	wxArrayString choices;
 
-	if (columns[col].type > 25000)
+	if (IsColEnum(col))
 	{
 		pgSet *enumSet = connection->ExecuteSet(
 							wxT("SELECT enumlabel")
@@ -2729,6 +2737,11 @@ bool sqlTable::IsColText(int col)
 bool sqlTable::IsColBoolean(int col)
 {
 	return (columns[col].type == PGOID_TYPE_BOOL);
+}
+
+bool sqlTable::IsColEnum(int col)
+{
+	return (columns[col].isEnum);
 }
 
 wxString sqlTable::GetColLabelValue(int col)

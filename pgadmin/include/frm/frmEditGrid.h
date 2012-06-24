@@ -120,6 +120,7 @@ public:
 		attr = new wxGridCellAttr;
 		isPrimaryKey = false;
 		needResize = false;
+		isEnum = false;
 	}
 	~sqlCellAttr()
 	{
@@ -133,7 +134,7 @@ public:
 	OID type;
 	long typlen, typmod;
 	wxString name, typeName, displayTypeName;
-	bool numeric, isPrimaryKey, needResize;
+	bool numeric, isPrimaryKey, needResize, isEnum;
 };
 
 
@@ -191,6 +192,7 @@ public:
 	}
 	bool IsColText(int col);
 	bool IsColBoolean(int col);
+	bool IsColEnum(int col);
 
 	bool CheckInCache(int row);
 	bool IsLineSaved(int row)
